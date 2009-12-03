@@ -1,5 +1,4 @@
-(ns objclj.core
-  (:use clojure.walk))
+(ns objclj.core)
 
 (comment
   EXAMPLE
