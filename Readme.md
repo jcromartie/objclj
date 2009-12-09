@@ -18,7 +18,7 @@ Example:
         (if (< 1 argc)
           (let [char* name (nth argv 1)]
             (greet name))
-            (printf "What's your name?\n"))
+          (printf "What's your name?\n"))
         (return 0)))
 
 Should (but currently does not, sorry) yield:
