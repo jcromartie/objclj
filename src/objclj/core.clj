@@ -19,8 +19,8 @@
 
 ; this is the fundamental form for printing C code
 (defmacro c
-  [code]
-  `(emit '~code))
+  [ & exprs ]
+  `(join (map emit (apply list '~exprs)) "\n"))
 
 ; emit returns a string represeting C code
 (defmulti emit type)
@@ -40,9 +40,18 @@
 (defmethod emit :default [expr] (pr-str expr))
 
 (defn emit-objc-send
-  [sel-keyword target args]
-  (format "[%s %s]" target (name sel-keyword)))
-
+  [sel target args]
+  (cond
+   (= 0 (count args)) (format "[%s %s]" (emit target) (name sel))
+   :else (let [sel-keys (.split (name sel) ":")]
+	   (assert (= (count args) (count sel-keys)))
+	   (format "[%s %s]"
+		   (emit target)
+		   (join (map
+			  (fn [sel-key arg] (format "%s:%s" sel-key (emit arg)))
+			  sel-keys
+			  args) " ")))))
+  
 (defmethod emit clojure.lang.PersistentList
   ; the core of it; emits C code for list forms
   ; handles objc sends, special forms, infix and function calls
@@ -66,6 +75,14 @@
   [r]
   (str (float r)))
 
+(defmethod emit java.lang.Character
+  [c]
+  (str c))
+
+(defmethod emit nil
+  [c]
+  "NULL")
+
 (defspecial .
   [_ target refinement]
   (format "%s.%s" target refinement))
@@ -74,6 +91,18 @@
   ; just return the literal string as code
   [_ expr]
   (str expr))
+
+(defspecial typedef
+  [_ oldtype newtype]
+  (format "typedef %s %s" (emit oldtype) (emit newtype)))
+
+(defspecial enum
+  [_ & symbols]
+  (format "enum {\n%s}"
+	  (join (map emit (map
+			   #(if (vector? %) (list 'code (format "%s = %s" (emit (first %)) (emit (second %)))) %)
+			   symbols))
+		",\n")))
 
 (defspecial var
   ; a declaration (int x)
@@ -97,7 +126,7 @@
 
 (defspecial do
   [_ & body]
-  (format "{ %s }" (apply str (map #(str (emit %) *sep*) body))))
+  (format "{\n%s}" (apply str (map #(str (emit %) *sep*) body))))
 
 (defspecial return
   [_ expr]
@@ -113,7 +142,7 @@
 
 (defspecial if
   [_ case true-code false-code]
-  (format "if (%s) %s; else %s;" (emit case) (emit true-code) (emit false-code)))
+  (format "if (%s) { %s; } else { %s; }" (emit case) (emit true-code) (emit false-code)))
 
 (defspecial =
   [_ l r]
@@ -131,7 +160,7 @@
 (defspecial let
   [_ bindings & exprs]
   (assert (vector? bindings))
-  (format "{ %s %s }"
+  (format "{\n%s\n%s\n}"
 	  (c-bindings bindings)
 	  (apply str (map #(str (emit %) *sep*) exprs))))
 
@@ -142,7 +171,7 @@
 (defspecial defn
   [_ ret-type fn-name arglist & body]
   (assert (vector? arglist))
-  (format "%s %s(%s) { %s }"
+  (format "%s %s(%s) {\n%s}"
 	  (emit ret-type)
 	  (emit fn-name)
 	  (join (map (fn [[arg-type arg]] (str (emit arg-type) " " (emit arg))) (partition 2 arglist)) ", ")
@@ -151,3 +180,10 @@
 (defspecial nth
   [_ ptr offset]
   (format "(%s)[%s]" (emit ptr) (emit offset)))
+
+(defspecial include
+  [_ what]
+  (format "#include \"%s\""
+	  (cond
+	   (symbol? what) (format "%s.h" what)
+	   (string? what) what)))
